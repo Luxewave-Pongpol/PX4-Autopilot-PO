@@ -1,6 +1,6 @@
 /****************************************************************************
  *
- *   Copyright (c) 2012-2019 PX4 Development Team. All rights reserved.
+ *   Copyright (c) 2012-2022 PX4 Development Team. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,7 +30,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
  *
  ****************************************************************************/
-
 /**
  * @file px4_simple_app.c
  * Minimal application example for PX4 autopilot
@@ -48,8 +47,9 @@
 #include <math.h>
 
 #include <uORB/uORB.h>
-#include <uORB/topics/vehicle_acceleration.h>
+#include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
+#include <uORB/topics/vehicle_attitude_setpoint.h>
 
 __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
@@ -57,10 +57,15 @@ int px4_simple_app_main(int argc, char *argv[])
 {
 	PX4_INFO("Hello Sky!");
 
-	/* subscribe to vehicle_acceleration topic */
-	int sensor_sub_fd = orb_subscribe(ORB_ID(vehicle_acceleration));
+	/* subscribe to sensor_combined topic */
+	int sensor_sub_fd = orb_subscribe(ORB_ID(sensor_combined));
 	/* limit the update rate to 5 Hz */
 	orb_set_interval(sensor_sub_fd, 200);
+
+	/* subscribe to vehicle_attitude_setpoint topic */
+	int vehicle_attitude_setpoint_sub_fd = orb_subscribe(ORB_ID(vehicle_attitude_setpoint));
+	/* limit the update rate to 2 Hz */
+	orb_set_interval(vehicle_attitude_setpoint_sub_fd, 500);
 
 	/* advertise attitude topic */
 	struct vehicle_attitude_s att;
@@ -70,6 +75,7 @@ int px4_simple_app_main(int argc, char *argv[])
 	/* one could wait for multiple topics with this technique, just using one here */
 	px4_pollfd_struct_t fds[] = {
 		{ .fd = sensor_sub_fd,   .events = POLLIN },
+		{ .fd = vehicle_attitude_setpoint_sub_fd,   .events = POLLIN },
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
@@ -79,7 +85,7 @@ int px4_simple_app_main(int argc, char *argv[])
 
 	for (int i = 0; i < 5; i++) {
 		/* wait for sensor update of 1 file descriptor for 1000 ms (1 second) */
-		int poll_ret = px4_poll(fds, 1, 1000);
+		int poll_ret = px4_poll(fds, 2, 1000);
 
 		/* handle the poll result */
 		if (poll_ret == 0) {
@@ -99,22 +105,35 @@ int px4_simple_app_main(int argc, char *argv[])
 
 			if (fds[0].revents & POLLIN) {
 				/* obtained data for the first file descriptor */
-				struct vehicle_acceleration_s accel;
+				struct sensor_combined_s raw;
 				/* copy sensors raw data into local buffer */
-				orb_copy(ORB_ID(vehicle_acceleration), sensor_sub_fd, &accel);
+				orb_copy(ORB_ID(sensor_combined), sensor_sub_fd, &raw);
 				PX4_INFO("Accelerometer:\t%8.4f\t%8.4f\t%8.4f",
-					 (double)accel.xyz[0],
-					 (double)accel.xyz[1],
-					 (double)accel.xyz[2]);
+					 (double)raw.accelerometer_m_s2[0],
+					 (double)raw.accelerometer_m_s2[1],
+					 (double)raw.accelerometer_m_s2[2]);
 
 				/* set att and publish this information for other apps
 				 the following does not have any meaning, it's just an example
 				*/
-				att.q[0] = accel.xyz[0];
-				att.q[1] = accel.xyz[1];
-				att.q[2] = accel.xyz[2];
+				att.q[0] = raw.accelerometer_m_s2[0];
+				att.q[1] = raw.accelerometer_m_s2[1];
+				att.q[2] = raw.accelerometer_m_s2[2];
 
 				orb_publish(ORB_ID(vehicle_attitude), att_pub, &att);
+			}
+
+			if (fds[1].revents & POLLIN) {
+				/* obtained data for the second file descriptor */
+				struct vehicle_attitude_setpoint_s raw_s;
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(vehicle_attitude_setpoint), vehicle_attitude_setpoint_sub_fd, &raw_s);
+				PX4_INFO("Desired Att in Quaternion:\t%8.4f\t%8.4f\t%8.4f\t%8.4f",
+					 (double)raw_s.q_d[0],
+					 (double)raw_s.q_d[1],
+					 (double)raw_s.q_d[2],
+					 (double)raw_s.q_d[3]);
+
 			}
 
 			/* there could be more file descriptors here, in the form like:
@@ -125,5 +144,7 @@ int px4_simple_app_main(int argc, char *argv[])
 
 	PX4_INFO("exiting");
 
-	return 0;
+
+	return OK;
 }
+
