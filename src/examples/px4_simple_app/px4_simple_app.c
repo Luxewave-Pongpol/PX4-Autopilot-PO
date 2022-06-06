@@ -50,6 +50,7 @@
 #include <uORB/topics/sensor_combined.h>
 #include <uORB/topics/vehicle_attitude.h>
 #include <uORB/topics/vehicle_attitude_setpoint.h>
+#include <uORB/topics/hover_thrust_estimate.h>
 
 __EXPORT int px4_simple_app_main(int argc, char *argv[]);
 
@@ -67,6 +68,12 @@ int px4_simple_app_main(int argc, char *argv[])
 	/* limit the update rate to 2 Hz */
 	orb_set_interval(vehicle_attitude_setpoint_sub_fd, 500);
 
+	/* subscribe to hover thrust estimate topic */
+	int hover_thrust_estimate_sub_fd = orb_subscribe(ORB_ID(hover_thrust_estimate));
+	/* limit the update rate to 2 Hz */
+	orb_set_interval(hover_thrust_estimate_sub_fd, 500);
+
+
 	/* advertise attitude topic */
 	struct vehicle_attitude_s att;
 	memset(&att, 0, sizeof(att));
@@ -76,6 +83,7 @@ int px4_simple_app_main(int argc, char *argv[])
 	px4_pollfd_struct_t fds[] = {
 		{ .fd = sensor_sub_fd,   .events = POLLIN },
 		{ .fd = vehicle_attitude_setpoint_sub_fd,   .events = POLLIN },
+		{ .fd = hover_thrust_estimate_sub_fd,   .events = POLLIN },
 		/* there could be more file descriptors here, in the form like:
 		 * { .fd = other_sub_fd,   .events = POLLIN },
 		 */
@@ -83,9 +91,9 @@ int px4_simple_app_main(int argc, char *argv[])
 
 	int error_counter = 0;
 
-	for (int i = 0; i < 5; i++) {
+	for (int i = 0; i < 50; i++) {
 		/* wait for sensor update of 1 file descriptor for 1000 ms (1 second) */
-		int poll_ret = px4_poll(fds, 2, 1000);
+		int poll_ret = px4_poll(fds, 3, 1000);
 
 		/* handle the poll result */
 		if (poll_ret == 0) {
@@ -128,11 +136,24 @@ int px4_simple_app_main(int argc, char *argv[])
 				struct vehicle_attitude_setpoint_s raw_s;
 				/* copy sensors raw data into local buffer */
 				orb_copy(ORB_ID(vehicle_attitude_setpoint), vehicle_attitude_setpoint_sub_fd, &raw_s);
-				PX4_INFO("Desired Att in Quaternion:\t%8.4f\t%8.4f\t%8.4f\t%8.4f",
+				PX4_INFO("Desired Att in Quaternion:\t%8.4f\t%8.4f\t%8.4f\t%8.4f \n Thrust setpoint: \t%8.4f\t%8.4f\t%8.4f",
 					 (double)raw_s.q_d[0],
 					 (double)raw_s.q_d[1],
 					 (double)raw_s.q_d[2],
-					 (double)raw_s.q_d[3]);
+					 (double)raw_s.q_d[3],
+					 (double)raw_s.thrust_body[0],
+					 (double)raw_s.thrust_body[1],
+					 (double)raw_s.thrust_body[2]);
+
+			}
+
+			if (fds[2].revents & POLLIN) {
+				/* obtained data for the second file descriptor */
+				struct hover_thrust_estimate_s raw_h_est;
+				/* copy sensors raw data into local buffer */
+				orb_copy(ORB_ID(hover_thrust_estimate), hover_thrust_estimate_sub_fd, &raw_h_est);
+				PX4_INFO("Hover Thrust Estimate:\t%8.4f",
+					 (double)raw_h_est.hover_thrust);
 
 			}
 
